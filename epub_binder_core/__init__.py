@@ -1,0 +1,25 @@
+"""Core logic extracted from the legacy EpubBinder GUI module."""
+
+__all__ = [
+    "cover",
+    "duplicate_cleanup",
+    "duplicate_service",
+    "epub_archive",
+    "epub_cleanup",
+    "errors",
+    "epub_io",
+    "epub_text",
+    "grouping",
+    "merge",
+    "merge_plan",
+    "naver_series",
+    "rename_service",
+    "title_parser",
+    "title_metadata",
+    "toc",
+    "txt_epub",
+    "txt_conversion",
+    "txt_detection",
+    "txt_chapters",
+    "txt_parser",
+]
