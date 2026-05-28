@@ -94,6 +94,38 @@ def test_merge_page_title_from_sources_uses_shared_priority():
     ) == "248화 직접 수정"
 
 
+def test_merge_page_title_prefers_html_over_numeric_id_ncx_label():
+    raw = """
+    <html><body>
+      <p class="p00 center"><span class="fs12 kbb">248화</span></p>
+      <p>본문</p>
+    </body></html>
+    """
+    assert toc.merge_page_title_from_sources(
+        raw,
+        out_filename="Text/Section0242.xhtml",
+        ncx_labels={"section0242.xhtml": "658204 248"},
+        ncx_doc_title="천하제일 당소예",
+        series_title="천하제일 당소예 1-323",
+    ) == "248화"
+
+
+def test_merge_page_title_uses_html_when_ncx_lists_only_cover():
+    raw = """
+    <html><body>
+      <p class="p00 center"><span class="fs12 kbb">260화</span></p>
+      <p>본문</p>
+    </body></html>
+    """
+    assert toc.merge_page_title_from_sources(
+        raw,
+        out_filename="Text/Section0260.xhtml",
+        ncx_labels={"coverpage.xhtml": "Start"},
+        ncx_doc_title="천하제일 당소예",
+        series_title="천하제일 당소예 1-323",
+    ) == "260화"
+
+
 def test_chapter_title_filters_plain_number_sentences_and_decimal_lines():
     plain = "<html><body><p>1. 원고의 청구를 기각한다.</p></body></html>"
     decimal = "<html><body><p>6.25 때의 난리는 난리도 아니다.</p></body></html>"
@@ -102,6 +134,26 @@ def test_chapter_title_filters_plain_number_sentences_and_decimal_lines():
     assert toc.extract_chapter_title(plain.encode("utf-8")) is None
     assert toc.extract_chapter_title(decimal.encode("utf-8")) is None
     assert toc.extract_chapter_title(author_volume.encode("utf-8")) is None
+
+
+def test_chapter_title_keeps_short_numbered_subtitles():
+    raw = "<html><body><p><b>8. 부부 싸움은 칼로 물 베기</b></p></body></html>"
+
+    assert toc.extract_chapter_title(raw.encode("utf-8")) == "8. 부부 싸움은 칼로 물 베기"
+    assert toc.is_subnav_heading_candidate("8. 부부 싸움은 칼로 물 베기")
+
+
+def test_continuation_notice_helpers_remove_numbered_volume_notice():
+    raw = "<html><body><h2>8. 부제</h2><p>-2권에 계속-</p><p>본문</p></body></html>"
+    cleaned, removed = toc.remove_continued_notice_html(raw)
+
+    assert removed == 1
+    assert "2권에 계속" not in cleaned
+    assert toc.extract_chapter_title("<html><body><p>-2권에 계속-</p></body></html>".encode("utf-8")) is None
+    assert toc.merge_page_title_from_sources(
+        "<html><body><p>-2권에 계속-</p></body></html>",
+        out_filename="continued.xhtml",
+    ) == ""
 
 
 def test_chapter_title_ignores_quote_bullet_and_plain_numeric_bold():

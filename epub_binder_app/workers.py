@@ -76,6 +76,7 @@ from epub_binder_core.toc import (
     is_subnav_heading_candidate as _is_subnav_heading_candidate,
     merge_page_title_from_sources as _core_merge_page_title_from_sources,
     prefer_filename_toc_title as _prefer_filename_toc_title,
+    remove_continued_notice_html as _core_remove_continued_notice_html,
     toc_label_from_filename as _toc_label_from_filename,
 )
 from epub_binder_core.txt_conversion import (
@@ -89,43 +90,7 @@ def _format_worker_error(exc):
 
 def _remove_continued_notice_html(raw: str) -> tuple[str, int]:
     """Remove standalone end-of-volume continuation notices from merged body HTML."""
-    removed = 0
-
-    def _is_notice(inner_html: str) -> bool:
-        text = re.sub(r"<style[^>]*>.*?</style>", "", inner_html, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r"<[^>]+>", " ", text)
-        text = re.sub(r"&nbsp;|&#160;", " ", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s+", " ", text).strip()
-        text = text.strip("「」『』[]()（）<>〈〉-–—_*·.。…!！~")
-        if not text:
-            return False
-        compact = re.sub(r"\s+", "", text)
-        return bool(re.fullmatch(
-            r"(?:다음|다음번|차기|차권|다음권|다음 권|다음화|다음 화|다음장|다음 장)"
-            r"(?:에|에서|으로)?(?:계속|이어집니다|이어짐|계속됩니다|계속됩니다\.?|계속됨)"
-            r"|(?:다음|다음권|다음 권)(?:에서|에)?만나요",
-            compact,
-        ))
-
-    def _drop_block(match):
-        nonlocal removed
-        if _is_notice(match.group(0)):
-            removed += 1
-            return ""
-        return match.group(0)
-
-    block_pat = re.compile(
-        r"<(?P<tag>p|div|h[1-6])\b[^>]*>.*?</(?P=tag)>",
-        re.DOTALL | re.IGNORECASE,
-    )
-    raw = block_pat.sub(_drop_block, raw)
-
-    line_pat = re.compile(
-        r"(?im)^\s*(?:다음\s*권|다음권|다음\s*화|다음화|다음\s*장|다음장)"
-        r"\s*(?:에|에서|으로)?\s*(?:계속(?:됩니다|됨)?|이어집니다|이어짐)\s*[.!。…]*\s*$"
-    )
-    raw, line_removed = line_pat.subn("", raw)
-    return raw, removed + line_removed
+    return _core_remove_continued_notice_html(raw)
 
 
 def scan_invisible_chars(epub_bytes: bytes) -> tuple:

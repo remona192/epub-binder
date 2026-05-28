@@ -36,15 +36,46 @@ python -m compileall -q epub_binder4.2.4.py epub_binder_core tests epub_binder_a
 
 ## 현재 상태
 
-- 현재 단계: Phase 10 legacy facade 제거 및 4.2.4 진입점 확정 완료
-- 다음 작업: 없음
-- Last Verified / 마지막 검증일: 2026-05-05
+- 현재 단계: Phase 11 main_window legacy helper 축소 진행 중
+- 다음 작업: 빌드 산출물 실행 확인 또는 다음 리팩토링 Phase 선정
+- Last Verified / 마지막 검증일: 2026-05-27
 
 마지막 검증 결과:
 
-- `python -m pytest -q`: 107 passed
-- `python -m compileall -q epub_binder4.2.4.py epub_binder_core tests epub_binder_app`: passed
-- `epub_binder4.2.4.py` entry import smoke: passed
+- `.\.venv\Scripts\python.exe -m pytest -q`: 215 passed
+- `.\.venv\Scripts\python.exe -m compileall -q epub_binder_core epub_binder_app epub_binder4.3.4.py`: passed
+- `cmd /c "echo. | epub_binder_bulid.bat"`: built `dist\EpubBinder4.3.4.exe` and root copy
+
+## Phase 11. main_window legacy helper 축소
+
+목표: `main_window.py`에 남은 과거 helper/fallback 구현을 실제 실행 경로에서 배제하고, core/app 패키지의 공통 함수로 수렴한다.
+
+- [x] 병합 계속 안내문 제거를 `epub_binder_core.toc.remove_continued_notice_html`로 공통화한다.
+- [x] `main_window.py`의 TOC helper 이름이 core 구현을 직접 사용하도록 연결한다.
+- [x] smoke 테스트가 `main_window.py` TOC helper와 core 함수 identity를 검증한다.
+- [x] `main_window.py`에 남은 legacy TOC fallback 본문을 삭제하거나 별도 compatibility 모듈로 이동한다.
+- [x] 동일 구현인 `ScanWorker`를 `epub_binder_app.workers` 공통 클래스로 수렴한다.
+- [x] `StripOnlyWorker`를 `epub_binder_app.workers` 공통 클래스로 수렴한다.
+- [x] `TxtEpubWorker`와 `EpubTxtWorker`를 `epub_binder_app.workers` 공통 클래스로 수렴한다.
+- [x] 네이버 표지 fetch 스레드를 `epub_binder_app.workers.NaverSeriesFetchThread` 공통 클래스로 수렴한다.
+- [x] 남은 worker 클래스 크기와 method/signal 구성을 비교해 직접 수렴 위험도를 확인한다.
+- [x] `main_window.py`의 TXT EPUB 빌드 helper를 `epub_binder_core.txt_epub.build_txt_epub`로 수렴한다.
+- [x] `main_window.py` 내부 `MergeWorker`와 `epub_binder_app.workers.MergeWorker`의 차이를 비교하고 한쪽으로 수렴한다.
+- [x] `main_window.py` 탭별 UI 코드를 `ui/tabs/` 하위 모듈로 나누는 계획을 갱신한다.
+- [x] 동일 구현인 `FileListWidget`과 `CoverPickerDialog`를 기존 `ui/widgets.py`, `ui/dialogs.py` 모듈로 수렴한다.
+
+탭 분리 계획:
+
+- 1차: 순수 계산/파일 작업이 이미 core/app worker로 이동한 탭부터 분리한다. 대상은 `ui/tabs/text_tools.py`의 TXT EPUB/EPUB TXT 연결부와 `ui/tabs/cleanup_tab.py`의 중복 정리 연결부다.
+- 2차: 병합 탭은 `MergeWorker` 공통화가 끝난 뒤 위젯 생성과 이벤트 연결만 별도 모듈로 이동한다. 병합 알고리즘은 `workers.py`와 `epub_binder_core`에 유지한다.
+- 3차: 이름변경/ZIP 묶기 탭은 `rename_service`, `grouping` 호출부를 먼저 얇게 만든 뒤 분리한다.
+- 각 단계는 UI 문구와 사용자-visible 동작을 바꾸지 않고, smoke 테스트로 main window import와 탭 등록 문자열을 고정한다.
+
+완료 기준:
+
+- 실제 앱 실행 경로가 core/app 공통 함수를 우선 사용한다.
+- `main_window.py`에 도메인 정규식과 EPUB 목차 로직이 새로 늘어나지 않는다.
+- 전체 테스트와 compileall이 통과한다.
 
 ## Phase 0. 기준 동작 고정
 

@@ -30,6 +30,55 @@ def html_to_plain_text(raw_html: str) -> str:
     text = unescape(text)
     return re.sub(r"\s+", " ", text).strip()
 
+
+def is_continuation_notice_text(text: str) -> bool:
+    """Return True for standalone end-of-volume continuation notices."""
+    value = re.sub(r"<style[^>]*>.*?</style>", "", str(text or ""), flags=re.DOTALL | re.IGNORECASE)
+    value = re.sub(r"<[^>]+>", " ", value)
+    value = re.sub(r"&nbsp;|&#160;", " ", value, flags=re.IGNORECASE)
+    value = unescape(value)
+    value = re.sub(r"\s+", " ", value).strip()
+    value = value.strip("「」『』[]()（）<>〈〉-–—_*·.。…!！~")
+    if not value:
+        return False
+    compact = re.sub(r"\s+", "", value)
+    return bool(re.fullmatch(
+        r"(?:다음|다음번|차기|차권|다음권|다음화|다음장)"
+        r"(?:에|에서|으로)?(?:계속|이어집니다|이어짐|계속됩니다|계속됨)"
+        r"|(?:다음|다음권)(?:에서|에)?만나요"
+        r"|(?:\d{1,3})(?:권|화|장|부|편)(?:에|에서|으로)?(?:계속|이어집니다|이어짐|계속됩니다|계속됨)",
+        compact,
+    ))
+
+
+def remove_continued_notice_html(raw: str) -> tuple[str, int]:
+    """Remove standalone continuation notice blocks from XHTML/HTML."""
+    removed = 0
+
+    def _drop_block(match: re.Match[str]) -> str:
+        nonlocal removed
+        if is_continuation_notice_text(match.group(0)):
+            removed += 1
+            return ""
+        return match.group(0)
+
+    block_pat = re.compile(
+        r"<(?P<tag>p|div|h[1-6])\b[^>]*>.*?</(?P=tag)>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    cleaned = block_pat.sub(_drop_block, str(raw or ""))
+
+    def _drop_line(match: re.Match[str]) -> str:
+        nonlocal removed
+        if is_continuation_notice_text(match.group(0)):
+            removed += 1
+            return ""
+        return match.group(0)
+
+    line_pat = re.compile(r"(?im)^[^\n\r<>]{0,80}(?:계속|이어집니다|이어짐)[^\n\r<>]{0,20}$")
+    cleaned = line_pat.sub(_drop_line, cleaned)
+    return cleaned, removed
+
 # Legacy-parity page skipping and chapter heading helpers.
 _decode_markup_bytes = decode_markup_bytes
 
@@ -271,6 +320,8 @@ def _is_noise_heading_candidate(s: str) -> bool:
     t = _normalize_title(s or "")
     if not t:
         return True
+    if is_continuation_notice_text(t):
+        return True
     if t.startswith("\u226B"):
         return True
     if re.match(r"^\[[^\]]+\]\s*.+\d+\s*(?:\uAD8C|\uD654|\uC7A5|\uBD80|\uD3B8)\s*$", t):
@@ -295,6 +346,20 @@ def _is_single_numbered_list_text(s: str) -> bool:
     if re.search(r'(?:\d+\s*[??????]|chapter\s*\d+|ch\.?\s*\d+|part\s*\d+)', t, re.IGNORECASE):
         return False
     return True
+
+
+def _is_numbered_chapter_title(s: str) -> bool:
+    """Short `N. title` labels are valid TOC headings unless they look like prose."""
+    t = _normalize_title(s or "")
+    if not re.match(r"^\d{1,4}\s*[.)]\s*\S+", t):
+        return False
+    if re.match(r"^\d+\.\d+(?:\s|$|%)", t):
+        return False
+    if re.search(r"[.!?…]$", t):
+        return False
+    if re.search(r"(?:다|요|니다|였다|한다|했다)$", t):
+        return False
+    return 2 <= len(t) <= 70 and len(t.split()) <= 8
 
 
 def _is_primary_chapter_heading(s: str) -> bool:
@@ -326,6 +391,8 @@ def _looks_like_body_sentence(s: str) -> bool:
         return False
     if _is_chapterish_title(t):
         return False
+    if _is_numbered_chapter_title(t):
+        return False
     if _is_probable_plain_number_sentence(t):
         return True
     if re.match(r"^\[[^\]]+\]\s*.+\d+\s*권\s*$", t):
@@ -350,9 +417,11 @@ def _is_subnav_heading_candidate(s: str) -> bool:
         re.IGNORECASE,
     ):
         return True
-    if _is_single_numbered_list_text(t):
-        return False
+    if _is_numbered_chapter_title(t):
+        return True
     if _is_probable_plain_number_sentence(t):
+        return False
+    if _is_single_numbered_list_text(t):
         return False
     if re.match(r"^\[[^\]]+\]\s*.+\d+\s*권\s*$", t):
         return False
@@ -596,11 +665,15 @@ def extract_chapter_title(content_bytes: bytes):
     # ── 0순위: 연속한 두 <p> — 마커 + 부제 결합 ──────────
     # 예) <p>1화</p><p>종남의 사파 천하제일 검수</p> → "1화. 종남의 사파 천하제일 검수"
     combined = _find_marker_subtitle_pair(raw)
-    if combined and 2 < len(combined) < 80 and not _is_single_numbered_list_text(combined):
+    if combined and 2 < len(combined) < 80 and (
+        not _is_single_numbered_list_text(combined) or _is_numbered_chapter_title(combined)
+    ):
         return combined
 
     ep_pair = _find_prologue_epilogue_bold_pair(raw)
-    if ep_pair and 2 < len(ep_pair) < 90 and not _is_single_numbered_list_text(ep_pair):
+    if ep_pair and 2 < len(ep_pair) < 90 and (
+        not _is_single_numbered_list_text(ep_pair) or _is_numbered_chapter_title(ep_pair)
+    ):
         return ep_pair
 
     # ── 0.5순위: 다중 서브헤딩에서 화수/챕터 마커 우선 ───────
@@ -610,7 +683,10 @@ def extract_chapter_title(content_bytes: bytes):
         for _t, _tag, _pos in _subs:
             if (re.search(r'\d+\s*[화권부]', _t)
                     or re.match(r'^[#＃]\s*\d+', _t)
-                    or _CHAP_NUM_TITLE.match(_t)) and not _looks_like_body_sentence(_t) and not _is_single_numbered_list_text(_t):
+                    or _CHAP_NUM_TITLE.match(_t)
+                    or _is_numbered_chapter_title(_t)) and not _looks_like_body_sentence(_t) and (
+                        not _is_single_numbered_list_text(_t) or _is_numbered_chapter_title(_t)
+                    ):
                 return _t
     except Exception:
         pass
@@ -626,7 +702,9 @@ def extract_chapter_title(content_bytes: bytes):
         text  = re.sub(r'\s+', ' ', text).strip()
         text  = _normalize_title(text)
         text  = _safe_title(text)
-        if _CHAP_NUM_TITLE.match(text) and 2 < len(text) < 80 and not _looks_like_body_sentence(text) and not _is_single_numbered_list_text(text):
+        if _CHAP_NUM_TITLE.match(text) and 2 < len(text) < 80 and not _looks_like_body_sentence(text) and (
+            not _is_single_numbered_list_text(text) or _is_numbered_chapter_title(text)
+        ):
             return text
         # 권/화 번호 포함 텍스트도 유효한 챕터 제목으로 처리
         if re.search(r'\d+\s*[권화부]', text) and 2 < len(text) < 80 and not _looks_like_body_sentence(text):
@@ -652,9 +730,15 @@ def extract_chapter_title(content_bytes: bytes):
         for _t in _bold_candidates:
             if (re.search(r'\d+\s*[화권부]', _t)
                     or re.match(r'^[#＃]\s*\d+', _t)
-                    or _CHAP_NUM_TITLE.match(_t)) and not _looks_like_body_sentence(_t) and not _is_single_numbered_list_text(_t):
+                    or _CHAP_NUM_TITLE.match(_t)
+                    or _is_numbered_chapter_title(_t)) and not _looks_like_body_sentence(_t) and (
+                        not _is_single_numbered_list_text(_t) or _is_numbered_chapter_title(_t)
+                    ):
                 return _t
-        if not _looks_like_body_sentence(_bold_candidates[0]) and not _is_single_numbered_list_text(_bold_candidates[0]):
+        if not _looks_like_body_sentence(_bold_candidates[0]) and (
+            not _is_single_numbered_list_text(_bold_candidates[0])
+            or _is_numbered_chapter_title(_bold_candidates[0])
+        ):
             return _bold_candidates[0]
 
     # ── 일반 패턴 ──────────────────────────────────────────
@@ -669,7 +753,9 @@ def extract_chapter_title(content_bytes: bytes):
                 continue
             if (_is_noise_heading_candidate(title)):
                 continue
-            if 1 < len(title) < 80 and not _looks_like_body_sentence(title) and not _is_single_numbered_list_text(title):
+            if 1 < len(title) < 80 and not _looks_like_body_sentence(title) and (
+                not _is_single_numbered_list_text(title) or _is_numbered_chapter_title(title)
+            ):
                 return title
 
     # ── fallback: 파일 전체가 짧은 제목인 경우 ────────────
@@ -678,7 +764,9 @@ def extract_chapter_title(content_bytes: bytes):
     full_text = re.sub(r'\s+', ' ', full_text).strip()
     full_text = _normalize_title(full_text)
     full_text = _safe_title(full_text)
-    if 1 < len(full_text) < 60 and not _is_noise_heading_candidate(full_text) and not _is_single_numbered_list_text(full_text):
+    if 1 < len(full_text) < 60 and not _is_noise_heading_candidate(full_text) and (
+        not _is_single_numbered_list_text(full_text) or _is_numbered_chapter_title(full_text)
+    ):
         return full_text
 
     return None
@@ -686,6 +774,7 @@ def extract_chapter_title(content_bytes: bytes):
 
 SUBNAV_HEAD_PAT = _SUBNAV_HEAD_PAT
 is_subnav_heading_candidate = _is_subnav_heading_candidate
+is_numbered_chapter_title = _is_numbered_chapter_title
 
 
 
@@ -928,6 +1017,8 @@ def merge_page_title_from_sources(
         page_title = str(override_title or "").strip()
     else:
         html_title = extract_chapter_title(raw_bytes) or ""
+        if is_continuation_notice_text(html_title):
+            html_title = ""
         page_title = ""
         labels = ncx_labels or {}
         if labels:
@@ -951,13 +1042,16 @@ def merge_page_title_from_sources(
                 else:
                     page_title = ncx_label
             else:
-                # NCX exists, but this page is not registered. Leave it empty so
-                # continuation pages do not become duplicate TOC entries.
-                page_title = ""
+                # Some single-chapter EPUBs register only the cover in NCX and
+                # leave the real content page unlisted. In that case, use the
+                # XHTML heading if it is clearly chapter-like.
+                page_title = html_title if html_title and _is_chapterish_title(html_title) else ""
         else:
             page_title = html_title
 
     if page_title:
+        if is_continuation_notice_text(page_title):
+            return ""
         page_title = re.sub(r"\s*\(연재중?\)\s*", "", page_title).strip()
         page_title = clean_chapter_display_title(page_title, series_title)
     return page_title

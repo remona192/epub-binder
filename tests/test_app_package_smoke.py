@@ -38,6 +38,66 @@ def test_app_package_and_ui_namespace_import_smoke():
     assert main_window.EPUBMergerGUI.__name__ == "EPUBMergerGUI"
 
 
+def test_main_window_toc_helpers_are_core_implementations():
+    from epub_binder_app.ui import main_window
+    from epub_binder_core import toc
+    from epub_binder_core import txt_epub
+
+    assert main_window.extract_chapter_title is toc.extract_chapter_title
+    assert main_window.extract_all_subheadings is toc.extract_all_subheadings
+    assert main_window.inject_subheading_anchors is toc.inject_subheading_anchors
+    assert main_window._toc_label_from_filename is toc.toc_label_from_filename
+    assert main_window._prefer_filename_toc_title is toc.prefer_filename_toc_title
+    assert main_window.build_txt_epub is txt_epub.build_txt_epub
+
+
+def test_main_window_reuses_shared_worker_classes():
+    from epub_binder_app import workers
+    from epub_binder_app.ui import main_window
+
+    assert main_window.MergeWorker is workers.MergeWorker
+    assert main_window.StripOnlyWorker is workers.StripOnlyWorker
+    assert main_window.ScanWorker is workers.ScanWorker
+    assert main_window.TxtEpubWorker is workers.TxtEpubWorker
+    assert main_window.EpubTxtWorker is workers.EpubTxtWorker
+    assert main_window.NaverSeriesFetchThread is workers.NaverSeriesFetchThread
+
+
+def test_main_window_reuses_shared_widget_and_dialog_classes():
+    from epub_binder_app.ui import dialogs, main_window, widgets
+
+    assert main_window.FileListWidget is widgets.FileListWidget
+    assert main_window.CoverPickerDialog is dialogs.CoverPickerDialog
+
+
+def test_main_window_no_longer_defines_shared_worker_duplicates():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "epub_binder_app"
+        / "ui"
+        / "main_window.py"
+    ).read_text(encoding="utf-8")
+
+    assert "class StripOnlyWorker" not in source
+    assert "class ScanWorker" not in source
+    assert "class TxtEpubWorker" not in source
+    assert "class EpubTxtWorker" not in source
+    assert "class NaverSeriesFetchThread" not in source
+    assert "class MergeWorker" not in source
+
+
+def test_main_window_no_longer_defines_shared_widget_dialog_duplicates():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "epub_binder_app"
+        / "ui"
+        / "main_window.py"
+    ).read_text(encoding="utf-8")
+
+    assert "class FileListWidget" not in source
+    assert "class CoverPickerDialog" not in source
+
+
 def test_build_script_includes_app_package_hidden_imports():
     build_script = Path(__file__).resolve().parents[1] / "epub_binder_bulid.bat"
     text = build_script.read_text(encoding="utf-8")
@@ -122,17 +182,11 @@ def test_merge_worker_cover_missing_signal_is_connected():
 
 
 def test_main_window_merge_worker_defines_cover_missing_signal():
-    source = (
-        Path(__file__).resolve().parents[1]
-        / "epub_binder_app"
-        / "ui"
-        / "main_window.py"
-    ).read_text(encoding="utf-8")
-    class_start = source.index("class MergeWorker")
-    init_start = source.index("    def __init__", class_start)
-    class_header = source[class_start:init_start]
+    from epub_binder_app import workers
+    from epub_binder_app.ui import main_window
 
-    assert "cover_missing_signal" in class_header
+    assert main_window.MergeWorker is workers.MergeWorker
+    assert hasattr(main_window.MergeWorker, "cover_missing_signal")
 
 
 def test_merge_complete_setting_is_not_cleared_by_filename_autodetect():
