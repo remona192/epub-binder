@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Epub Binder 사용 설명서</title>
+  <style>
+    body { margin: 0; font-family: "Malgun Gothic", system-ui, sans-serif; color: #1a2035; background: #f4f6fb; }
+    main { max-width: 980px; margin: 0 auto; padding: 32px 18px 56px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 34px 0 12px; font-size: 21px; }
+    h3 { margin: 22px 0 8px; font-size: 16px; }
+    p, li { line-height: 1.72; font-size: 15px; }
+    section { background: #fff; border: 1px solid #dde2ef; border-radius: 8px; padding: 22px; margin-top: 18px; }
+    code, kbd { background: #eef1f6; border-radius: 4px; padding: 2px 6px; }
+    .note { color: #4a5470; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Epub Binder 사용 설명서</h1>
+  <p class="note">EPUB 병합, 이름 변경, TXT 변환, 중복 정리를 한 프로그램에서 처리합니다.</p>
+
+  <section>
+    <h2>병합</h2>
+    <ol>
+      <li><code>파일 열기</code>로 합칠 EPUB을 선택합니다. 새 파일을 다시 추가하면 기존 병합 목록은 새 목록으로 교체됩니다.</li>
+      <li>자동 정렬은 본편을 먼저 두고, 에필로그, 외전, 특별외전 순서로 뒤에 배치합니다.</li>
+      <li>파일명은 단행본 묶음이면 전체 파일 수 기준으로 <code>1-n권</code> 형식이 됩니다. 예를 들어 본편 8권, 외전 2권, 특별외전 1권이면 <code>1-11권 (완결)</code>로 잡습니다.</li>
+      <li><code>목차</code>에서 권 제목과 화 제목을 확인하고 필요한 부분만 수정합니다.</li>
+      <li><code>병합 시작</code>을 누르면 완료 후 파일 목록이 자동으로 비워져 같은 목록을 실수로 다시 병합하지 않습니다.</li>
+    </ol>
+
+    <h3>표지</h3>
+    <p><code>선택</code> 버튼을 누르면 전체 병합 목록에서 표지 후보를 모아 보여줍니다. 라디오 버튼으로 대표 표지를 1개 고르고, <code>표지 추가</code>를 체크하면 대표 표지 뒤에 추가 표지가 순서대로 들어갑니다.</p>
+    <p><code>EPUB 내부의 모든 이미지 표시</code>는 표지 후보가 부족할 때만 켜면 됩니다. 삽화도 함께 보이므로 필요한 이미지만 확인해서 선택합니다.</p>
+  </section>
+
+  <section>
+    <h2>이름 변경</h2>
+    <ol>
+      <li><code>열기</code>로 파일을 불러오면 변경될 이름을 미리 보여줍니다.</li>
+      <li>외전, 번외, 특별외전은 같은 작품 묶음으로 인식합니다.</li>
+      <li><code>ZIP 묶기</code>는 변경된 이름 기준으로 같은 작품끼리 묶습니다. 원본 파일명보다 정리된 파일명을 기준으로 묶고 싶을 때 사용합니다.</li>
+      <li><code>1-1권</code>, <code>1-2권</code>, <code>상/중/하</code>처럼 서로 다른 권차 표기는 정상 파일로 보고 보존합니다.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>TXT 변환</h2>
+    <p>TXT를 EPUB으로 만들 때 표지를 지정할 수 있습니다. 네이버 시리즈 표지를 직접 가져와야 할 때만 오른쪽 위 <code>설정</code>에서 쿠키를 저장합니다.</p>
+    <h3>시리즈 표지 쿠키</h3>
+    <ol>
+      <li>브라우저에서 네이버 시리즈에 로그인합니다.</li>
+      <li>작품 페이지에서 개발자 도구를 열고 <code>Application</code> 또는 <code>저장소</code> 탭으로 이동합니다.</li>
+      <li>Cookies 항목에서 <code>NID_AUT</code>, <code>NID_SES</code> 값을 복사해 프로그램 설정에 붙여넣습니다.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>중복 정리</h2>
+    <ol>
+      <li>정리할 폴더를 선택하고 <code>스캔</code>합니다.</li>
+      <li><code>삭제후보 자동선택</code>을 누르면 안전한 후보만 체크됩니다.</li>
+      <li>확인 필요 항목은 <code>확인대상 해시 확인</code>으로 내용을 비교한 뒤 판단합니다.</li>
+      <li><code>선택 항목 격리 폴더로 이동</code>을 누르면 파일은 삭제되지 않고 선택한 폴더 안의 <code>_dedupe_trash_날짜</code> 폴더로 이동합니다.</li>
+      <li>문제가 있으면 <code>최근 격리 복구</code>로 되돌릴 수 있습니다.</li>
+    </ol>
+  </section>
+</main>
+</body>
+</html>
