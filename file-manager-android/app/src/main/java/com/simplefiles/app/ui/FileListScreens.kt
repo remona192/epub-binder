@@ -173,8 +173,9 @@ fun FileListScaffold(
         Column(Modifier.padding(padding).fillMaxSize()) {
             header?.invoke()
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp))
-            if (!loading && items.isEmpty()) {
-                EmptyState(emptyText)
+            if (items.isEmpty()) {
+                // 로딩 중에는 빈 목록을 그리지 않아야 뒤로 왔을 때 스크롤 위치가 유지된다
+                if (!loading) EmptyState(emptyText)
             } else {
                 LazyColumn(state = listState, contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)) {
                     itemsIndexed(items, key = { _, it -> it.path }) { i, item ->
