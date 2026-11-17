@@ -12,8 +12,8 @@ android {
         applicationId = "com.simplefiles.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
     }
 
     // 사이드로드용 고정 서명키: 빌드가 바뀌어도 덮어쓰기 설치가 되도록 저장소에 포함한다.

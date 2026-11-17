@@ -65,7 +65,7 @@ class BatchRenameTest {
     }
 
     @Test fun existingFileIsError() {
-        val p = BatchRenamer.plan(inputs("a.txt"), listOf(RenameRule.Insert("b")), false) { it.name == "ba.txt" }
+        val p = BatchRenamer.plan(inputs("a.txt"), listOf(RenameRule.Insert("b")), false, exists = { it.name == "ba.txt" })
         assertNotNull(p.previews[0].error)
     }
 
@@ -100,5 +100,39 @@ class BatchRenameTest {
         assertTrue(p.previews.all { it.error != null })
         val p2 = BatchRenamer.plan(ins, listOf(RenameRule.Template("{n}")), false)
         assertNull(p2.previews[0].error)
+    }
+}
+
+class BatchRenameBinderOptionsTest {
+    private fun inputs(vararg names: String) = names.map { RenameInput("/d/$it", it, false) }
+    private val none: (java.io.File) -> Boolean = { false }
+
+    @Test fun overwriteAndEpisodeSuffix() {
+        val p = BatchRenamer.plan(
+            inputs("a 3화.txt", "b.txt"),
+            listOf(RenameRule.Overwrite("[작가] 제목"), RenameRule.EpisodeSuffix(start = 1, unit = "화")),
+            false, none,
+        )
+        assertEquals(listOf("[작가] 제목 1화.txt", "[작가] 제목 2화.txt"), p.previews.map { it.newName })
+    }
+
+    @Test fun scopeOnlyIncludedAndNumbersCountIncludedOnly() {
+        val ins = inputs("a.txt", "b.txt", "c.txt")
+        val p = BatchRenamer.plan(
+            ins, listOf(RenameRule.EpisodeSuffix(unit = "권")), false, none,
+            included = setOf("/d/a.txt", "/d/c.txt"),
+        )
+        assertEquals(listOf("a 1권.txt", "b.txt", "c 2권.txt"), p.previews.map { it.newName })
+        assertTrue(p.previews[1].excluded)
+        assertEquals(2, p.changes.size)
+    }
+
+    @Test fun postOptions() {
+        val name = java.text.Normalizer.normalize("[작가]_제목_()_12회차.txt", java.text.Normalizer.Form.NFD)
+        val p = BatchRenamer.plan(
+            inputs(name), emptyList(), false, none,
+            post = RenamePostOptions(cleanup = true, unifyEpisode = true, fixJamo = true, underscoreToSpace = true),
+        )
+        assertEquals("[작가] 제목 12화.txt", p.previews[0].newName)
     }
 }

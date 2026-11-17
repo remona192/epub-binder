@@ -159,7 +159,7 @@ fun typeIconOf(name: String, isDir: Boolean): TypeIcon {
 }
 
 @Composable
-fun FileIcon(name: String, path: String, isDir: Boolean, size: Dp = 44.dp) {
+fun FileIcon(name: String, path: String, isDir: Boolean, size: Dp = 44.dp, thumbnail: Boolean = true) {
     val t = typeIconOf(name, isDir)
     val shape = RoundedCornerShape(12.dp)
     Box(
@@ -168,7 +168,7 @@ fun FileIcon(name: String, path: String, isDir: Boolean, size: Dp = 44.dp) {
     ) {
         Icon(t.icon, null, tint = t.color, modifier = Modifier.size(size * 0.55f))
         val cat = if (isDir) null else FileCategory.of(name)
-        if (cat == FileCategory.IMAGES || cat == FileCategory.VIDEOS) {
+        if (thumbnail && (cat == FileCategory.IMAGES || cat == FileCategory.VIDEOS)) {
             val ctx = LocalContext.current
             AsyncImage(
                 model = ImageRequest.Builder(ctx).data(File(path)).size(160).build(),
@@ -222,7 +222,7 @@ fun FileRow(
                 SelectMark(selected)
                 Spacer(Modifier.width(14.dp))
             }
-            FileIcon(item.name, item.path, item.isDir)
+            FileIcon(item.name, item.path, item.isDir, thumbnail = !item.inArchive)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 HighlightedText(item.name, highlight)

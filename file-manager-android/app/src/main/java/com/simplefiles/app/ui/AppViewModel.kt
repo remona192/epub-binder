@@ -17,12 +17,14 @@ import androidx.lifecycle.viewModelScope
 import com.simplefiles.app.data.AppChoice
 import com.simplefiles.app.data.FileItem
 import com.simplefiles.app.data.FileOpener
+import com.simplefiles.app.data.IndexEntry
 import com.simplefiles.app.data.Prefs
 import com.simplefiles.app.data.SortBy
 import com.simplefiles.app.data.Storage
 import com.simplefiles.app.data.StorageIndex
 import com.simplefiles.app.data.StorageRoot
 import com.simplefiles.app.data.fileComparator
+import com.simplefiles.core.ArchiveReader
 import com.simplefiles.core.BatchRenamer
 import com.simplefiles.core.ConflictChoice
 import com.simplefiles.core.ConflictDecision
@@ -32,6 +34,7 @@ import com.simplefiles.core.DupOptions
 import com.simplefiles.core.DuplicateFinder
 import com.simplefiles.core.FileCategory
 import com.simplefiles.core.FileTransfer
+import com.simplefiles.core.NameFixer
 import com.simplefiles.core.NameUtil
 import com.simplefiles.core.TransferMode
 import com.simplefiles.core.TrashEntry
@@ -95,6 +98,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var useTrash by mutableStateOf(prefs.useTrash)
         private set
+    var autoFixJamo by mutableStateOf(prefs.autoFixJamo)
+        private set
+    var autoFixTelegram by mutableStateOf(prefs.autoFixTelegram)
+        private set
+    var searchArchives by mutableStateOf(prefs.searchArchives)
+        private set
+
+    /** 압축 파일 안의 항목을 눌렀을 때 */
+    var archiveTarget by mutableStateOf<FileItem?>(null)
 
     // ---- 복사/이동 대기 ----
     var clipboard by mutableStateOf<Clipboard?>(null)
@@ -145,7 +157,122 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun rebuildIndex() = index.rebuild(roots.map { it.file }, showHidden)
+    fun rebuildIndex() = index.rebuild(
+        roots.map { it.file },
+        showHidden,
+        includeArchives = searchArchives,
+        onFilesScanned = ::autoFixNames,
+    )
+
+    // ================= 파일명 자동 교정 (자소 분리 / 텔레그램 언더바) =================
+
+    @Volatile private var autoFixRunning = false
+
+    private fun autoFixNames(entries: List<IndexEntry>) {
+        val jamo = autoFixJamo
+        val telegram = autoFixTelegram
+        if ((!jamo && !telegram) || autoFixRunning) return
+        // 다운로드 중일 수 있는 방금 바뀐 파일은 건너뜀
+        val cutoff = System.currentTimeMillis() - 60_000
+        val items = entries.asSequence()
+            .filter { !it.item.inArchive && it.item.lastModified < cutoff }
+            .filter { (jamo && NameFixer.hasSplitJamo(it.item.name)) || (telegram && it.item.name.contains('_')) }
+            .map { Triple(it.item.path, it.item.name, it.item.isDir) }
+            .toList()
+        if (items.isEmpty()) return
+        val plan = NameFixer.planAutoFix(items, jamo, telegram, prefs.autoFixIgnore)
+        if (plan.isEmpty()) return
+        autoFixRunning = true
+        viewModelScope.launch {
+            val applied = withContext(Dispatchers.IO) {
+                plan.flatMap { fix -> BatchRenamer.execute(listOf(fix.file to fix.newName)).applied.map { it to fix.reason } }
+            }
+            autoFixRunning = false
+            if (applied.isEmpty()) return@launch
+            afterChange()
+            val jamoCount = applied.count { it.second == NameFixer.Reason.JAMO }
+            val tgCount = applied.size - jamoCount
+            val detail = listOfNotNull(
+                if (jamoCount > 0) "자소 분리 $jamoCount" else null,
+                if (tgCount > 0) "텔레그램 언더바 $tgCount" else null,
+            ).joinToString(", ")
+            val r = snackbar.showSnackbar(
+                "파일명 ${applied.size}개를 자동 교정했습니다 ($detail)",
+                actionLabel = "실행 취소",
+                duration = SnackbarDuration.Long,
+            )
+            if (r == SnackbarResult.ActionPerformed) {
+                val list = applied.map { it.first }
+                withContext(Dispatchers.IO) { list.asReversed().forEach { BatchRenamer.undo(listOf(it)) } }
+                // 되돌린 항목은 다시 자동 교정하지 않는다
+                prefs.autoFixIgnore = prefs.autoFixIgnore + list.map { it.from.path }
+                afterChange()
+                message("${list.size}개를 원래 이름으로 되돌렸습니다")
+            }
+        }
+    }
+
+    fun toggleAutoFixJamo() {
+        autoFixJamo = !autoFixJamo
+        prefs.autoFixJamo = autoFixJamo
+        if (autoFixJamo) rebuildIndex()
+    }
+
+    fun toggleAutoFixTelegram() {
+        autoFixTelegram = !autoFixTelegram
+        prefs.autoFixTelegram = autoFixTelegram
+        if (autoFixTelegram) rebuildIndex()
+    }
+
+    fun toggleSearchArchives() {
+        searchArchives = !searchArchives
+        prefs.searchArchives = searchArchives
+        rebuildIndex()
+    }
+
+    // ================= 압축 파일 안의 항목 =================
+
+    /** 꺼내서 원하는 뷰어로 열기 (앱 캐시에 임시로 꺼냄) */
+    fun openArchiveItem(item: FileItem) {
+        archiveTarget = null
+        val archive = item.archivePath ?: return
+        val entry = item.entryPath ?: return
+        viewModelScope.launch {
+            val dir = File(getApplication<Application>().cacheDir, "archive/" + Integer.toHexString(item.path.hashCode()))
+            val out = File(dir, item.name)
+            val ok = withContext(Dispatchers.IO) {
+                dir.parentFile?.listFiles()?.filter { it != dir }?.forEach { it.deleteRecursively() }
+                out.exists() || ArchiveReader.extract(File(archive), entry, out)
+            }
+            if (ok) openFile(out) else message("압축 파일에서 꺼내지 못했습니다 (암호가 걸렸거나 손상됨)")
+        }
+    }
+
+    /** 압축 파일이 있는 폴더에 꺼내기 */
+    fun extractArchiveItemBeside(item: FileItem) {
+        archiveTarget = null
+        val archive = File(item.archivePath ?: return)
+        val entry = item.entryPath ?: return
+        val dir = archive.parentFile ?: return
+        viewModelScope.launch {
+            val out = withContext(Dispatchers.IO) {
+                val target = File(dir, NameUtil.uniqueName(dir, item.name, false))
+                if (ArchiveReader.extract(archive, entry, target)) target else null
+            }
+            if (out == null) {
+                message("압축 파일에서 꺼내지 못했습니다")
+            } else {
+                afterChange()
+                message("'${out.name}'을(를) ${displayPath(dir.path)}에 꺼냈습니다")
+            }
+        }
+    }
+
+    fun showArchiveLocation(item: FileItem) {
+        archiveTarget = null
+        val archive = File(item.archivePath ?: return)
+        archive.parentFile?.let { navigate(Screen.Browser(it.path)) }
+    }
 
     // ================= 이동(내비게이션) =================
 
@@ -225,16 +352,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ================= 선택 =================
 
     fun toggleSelect(path: String) {
+        if (path.contains("!/") && !File(path).exists()) {
+            message("압축 파일 안의 항목은 눌러서 꺼낸 뒤 사용할 수 있습니다")
+            return
+        }
         if (!selection.remove(path)) selection.add(path)
     }
 
     fun setSelection(paths: List<String>) {
         selection.clear()
-        selection.addAll(paths)
+        selection.addAll(paths.filter { !(it.contains("!/") && !File(it).exists()) })
     }
 
     fun onItemClick(item: FileItem) {
         when {
+            item.inArchive -> if (item.isDir) {
+                item.archivePath?.let { File(it).parentFile }?.let { navigate(Screen.Browser(it.path)) }
+            } else {
+                archiveTarget = item
+            }
             selection.isNotEmpty() -> toggleSelect(item.path)
             item.isDir -> navigate(Screen.Browser(item.path))
             else -> openFile(item.file)
@@ -432,7 +568,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val prefix = scope?.trimEnd('/')?.plus("/")
             val groups = withContext(Dispatchers.Default) {
                 val cands = entries.asSequence()
-                    .filter { !it.item.isDir && (prefix == null || it.item.path.startsWith(prefix)) }
+                    .filter { !it.item.isDir && !it.item.inArchive && (prefix == null || it.item.path.startsWith(prefix)) }
                     .map { DupCandidate(it.item.path, it.item.name, it.item.size, it.item.lastModified) }
                     .toList()
                 DuplicateFinder.find(cands, options, { p -> dupProgress = p }, { !isActive })

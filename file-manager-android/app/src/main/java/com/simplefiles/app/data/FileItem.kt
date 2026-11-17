@@ -12,7 +12,13 @@ data class FileItem(
     val lastModified: Long,
     /** 폴더의 항목 수 (모르면 -1) */
     val childCount: Int = -1,
+    /** 압축 파일 안의 항목이면 그 압축 파일 경로 */
+    val archivePath: String? = null,
+    /** 압축 파일 안에서의 경로 */
+    val entryPath: String? = null,
 ) {
+    val inArchive: Boolean get() = archivePath != null
+
     val file: File get() = File(path)
     val ext: String get() = NameUtil.ext(name)
 

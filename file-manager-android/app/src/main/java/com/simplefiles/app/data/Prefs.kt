@@ -38,6 +38,26 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("use_trash", true)
         set(v) = sp.edit().putBoolean("use_trash", v).apply()
 
+    /** 자소 분리 파일명 자동 교정 */
+    var autoFixJamo: Boolean
+        get() = sp.getBoolean("auto_fix_jamo", true)
+        set(v) = sp.edit().putBoolean("auto_fix_jamo", v).apply()
+
+    /** 텔레그램 파일 언더바 자동 교정 */
+    var autoFixTelegram: Boolean
+        get() = sp.getBoolean("auto_fix_telegram", true)
+        set(v) = sp.edit().putBoolean("auto_fix_telegram", v).apply()
+
+    /** zip/7z 안의 파일도 검색 */
+    var searchArchives: Boolean
+        get() = sp.getBoolean("search_archives", true)
+        set(v) = sp.edit().putBoolean("search_archives", v).apply()
+
+    /** 자동 교정을 되돌린 경로 (다시 고치지 않음) */
+    var autoFixIgnore: Set<String>
+        get() = sp.getStringSet("auto_fix_ignore", emptySet()).orEmpty().toSet()
+        set(v) = sp.edit().putStringSet("auto_fix_ignore", v).apply()
+
     companion object {
         private const val APP_PREFIX = "app_"
     }

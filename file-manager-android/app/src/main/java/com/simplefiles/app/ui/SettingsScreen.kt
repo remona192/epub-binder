@@ -114,8 +114,32 @@ fun SettingsScreen(vm: AppViewModel) {
                 }
             }
             item {
+                SectionTitle("파일명 자동 교정")
+                SectionCard {
+                    SettingSwitch(
+                        "자소 분리 자동 교정",
+                        "ㄴㅐㄱㅏ 처럼 풀어진 한글 파일명(맥·일부 앱)을 완성형으로 고칩니다",
+                        vm.autoFixJamo,
+                    ) { vm.toggleAutoFixJamo() }
+                    SettingSwitch(
+                        "텔레그램 파일 언더바 자동 교정",
+                        "텔레그램 폴더의 '내가_잘못했다면_1권' → '내가 잘못했다면 1권' (사진 자동 이름은 제외)",
+                        vm.autoFixTelegram,
+                    ) { vm.toggleAutoFixTelegram() }
+                }
+                Text(
+                    "색인할 때마다 자동으로 고치고, 알림에서 '실행 취소'를 누르면 되돌린 파일은 다시 고치지 않습니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp),
+                )
+            }
+            item {
                 SectionTitle("검색 색인")
                 SectionCard {
+                    SettingSwitch("압축 파일 안도 검색", "zip · 7z · cbz 안의 파일 이름까지 검색합니다", vm.searchArchives) {
+                        vm.toggleSearchArchives()
+                    }
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("저장공간 전체 색인")

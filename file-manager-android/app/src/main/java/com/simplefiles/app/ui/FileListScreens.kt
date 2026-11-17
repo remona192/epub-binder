@@ -106,10 +106,11 @@ fun FileListScaffold(
                     },
                     title = { Text("${vm.selection.size}개 선택됨") },
                     actions = {
-                        val all = items.isNotEmpty() && selectedSet.size == items.size
+                        val selectable = items.count { !it.inArchive }
+                        val all = selectable > 0 && selectedSet.size == selectable
                         Row(
                             Modifier.clip(RoundedCornerShape(12.dp)).clickable {
-                                if (all) vm.selection.clear() else vm.setSelection(items.map { it.path })
+                                if (all) vm.selection.clear() else vm.setSelection(items.filter { !it.inArchive }.map { it.path })
                             }.padding(end = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -287,7 +288,7 @@ fun CategoryScreen(vm: AppViewModel, category: FileCategory) {
     val items by produceState<List<FileItem>?>(null, entries, category) {
         value = withContext(Dispatchers.Default) {
             entries.asSequence()
-                .filter { !it.item.isDir && FileCategory.of(it.item.name) == category }
+                .filter { !it.item.isDir && !it.item.inArchive && FileCategory.of(it.item.name) == category }
                 .map { it.item }
                 .sortedByDescending { it.lastModified }
                 .toList()
@@ -309,7 +310,7 @@ fun CategoryScreen(vm: AppViewModel, category: FileCategory) {
 // ======================= 검색 =======================
 
 private enum class SearchFilter(val label: String) {
-    ALL("전체"), FOLDERS("폴더"), IMAGES("이미지"), VIDEOS("동영상"), AUDIO("오디오"), DOCS("문서")
+    ALL("전체"), FOLDERS("폴더"), IMAGES("이미지"), VIDEOS("동영상"), AUDIO("오디오"), DOCS("문서"), ARCHIVE("압축 파일 안")
 }
 
 /** 휴대폰 저장공간 전체에서 파일명 검색. "내가"만 입력해도 "내가 잘못했다면"이 나온다. */
@@ -340,9 +341,10 @@ fun SearchScreen(vm: AppViewModel) {
                         SearchFilter.VIDEOS -> FileCategory.of(e.item.name) == FileCategory.VIDEOS
                         SearchFilter.AUDIO -> FileCategory.of(e.item.name) == FileCategory.AUDIO
                         SearchFilter.DOCS -> FileCategory.of(e.item.name) == FileCategory.DOCUMENTS
+                        SearchFilter.ARCHIVE -> e.item.inArchive
                     }
                 }
-                .sortedWith(compareBy({ q.rank(it.key) }, { !it.item.isDir }, { it.key }))
+                .sortedWith(compareBy({ it.item.inArchive }, { q.rank(it.key) }, { !it.item.isDir }, { it.key }))
                 .take(3000)
                 .map { it.item }
                 .toList()
@@ -358,6 +360,7 @@ fun SearchScreen(vm: AppViewModel) {
         emptyText = when {
             q.isEmpty -> "파일 이름의 일부만 입력해도 찾습니다\n(초성 검색 가능: ㄴㄱ → 내가…)"
             scanning -> "저장공간을 읽는 중… (${entries.size}개)"
+            filter == SearchFilter.ARCHIVE && !vm.searchArchives -> "설정에서 '압축 파일 안도 검색'을 켜 주세요"
             else -> "검색 결과가 없습니다"
         },
         titleContent = {
@@ -402,7 +405,16 @@ fun SearchScreen(vm: AppViewModel) {
                 }
             }
         },
-        subtitle = { vm.displayPath(File(it.path).parent ?: "") + if (!it.isDir) "  ·  ${formatSize(it.size)}" else "" },
+        subtitle = { item ->
+            if (item.inArchive) {
+                val archive = File(item.archivePath!!)
+                val inner = item.entryPath?.substringBeforeLast('/', "").orEmpty()
+                "압축 파일 " + archive.name + (if (inner.isNotEmpty()) " › $inner" else "") +
+                    "  ·  " + vm.displayPath(archive.parent ?: "")
+            } else {
+                vm.displayPath(File(item.path).parent ?: "") + if (!item.isDir) "  ·  ${formatSize(item.size)}" else ""
+            }
+        },
         highlight = { q.highlight(it.name) },
     )
 }

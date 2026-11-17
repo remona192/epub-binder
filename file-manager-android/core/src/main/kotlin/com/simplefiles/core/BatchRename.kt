@@ -168,6 +168,36 @@ sealed class RenameRule {
         }
     }
 
+    /** 덮어쓰기: 이름 전체를 새 이름으로 (바인더 '덮어쓰기') */
+    data class Overwrite(
+        val newName: String = "",
+        override val enabled: Boolean = true,
+    ) : RenameRule() {
+        override val title get() = "덮어쓰기"
+        override fun withEnabled(on: Boolean) = copy(enabled = on)
+        override fun applyName(name: String, ctx: RenameContext): String = newName.ifBlank { name }
+    }
+
+    /** 뒤에 화수 붙이기 (바인더): 기존 끝의 "N화/N권"을 지우고 " 1화", " 2화"… 를 붙인다 */
+    data class EpisodeSuffix(
+        val start: Int = 1,
+        val step: Int = 1,
+        val unit: String = "화",
+        override val enabled: Boolean = true,
+    ) : RenameRule() {
+        override val title get() = "뒤에 화수 붙이기"
+        override fun withEnabled(on: Boolean) = copy(enabled = on)
+        override fun applyName(name: String, ctx: RenameContext): String {
+            val n = start + ctx.index * step
+            val stripped = TRAILING.replace(name, "").trim()
+            return "$stripped $n$unit".trim()
+        }
+
+        companion object {
+            private val TRAILING = Regex("\\s*\\d+\\s*[화권]\\s*$")
+        }
+    }
+
     /** 확장자 바꾸기 (빈칸이면 확장자 제거) */
     data class Extension(
         val newExt: String = "",
@@ -179,17 +209,38 @@ sealed class RenameRule {
     }
 }
 
+/** 규칙 적용 뒤 후처리 (EPUB 바인더 일괄 변경 옵션) */
+data class RenamePostOptions(
+    /** 빈 괄호, 중복 공백, 겹친 구분자 정리 */
+    val cleanup: Boolean = false,
+    /** "12회차/12회/#12" → "12화", "1~216화" → "1-216화" */
+    val unifyEpisode: Boolean = false,
+    /** 자소 분리(NFD) 한글을 완성형으로 */
+    val fixJamo: Boolean = false,
+    /** 언더바를 공백으로 (텔레그램) */
+    val underscoreToSpace: Boolean = false,
+) {
+    val any: Boolean get() = cleanup || unifyEpisode || fixJamo || underscoreToSpace
+
+    companion object {
+        val NONE = RenamePostOptions()
+        val RECOMMENDED = RenamePostOptions(cleanup = true, unifyEpisode = true, fixJamo = true)
+    }
+}
+
 data class RenamePreview(
     val input: RenameInput,
     val newName: String,
     val error: String?,
+    /** 적용 범위에서 빠진 항목 */
+    val excluded: Boolean = false,
 ) {
     val changed: Boolean get() = newName != input.name
 }
 
 data class RenamePlan(val previews: List<RenamePreview>, val ruleError: String?) {
     val hasErrors: Boolean get() = ruleError != null || previews.any { it.error != null }
-    val changes: List<RenamePreview> get() = previews.filter { it.changed && it.error == null }
+    val changes: List<RenamePreview> get() = previews.filter { it.changed && it.error == null && !it.excluded }
 }
 
 object BatchRenamer {
@@ -204,6 +255,9 @@ object BatchRenamer {
         rules: List<RenameRule>,
         includeExtension: Boolean,
         exists: (File) -> Boolean = { it.exists() },
+        post: RenamePostOptions = RenamePostOptions.NONE,
+        /** 적용할 항목 경로 (null = 전체). 번호는 적용 항목끼리만 센다. */
+        included: Set<String>? = null,
     ): RenamePlan {
         val active = rules.filter { it.enabled }
         var ruleError: String? = null
@@ -220,10 +274,14 @@ object BatchRenamer {
             return RenamePlan(inputs.map { RenamePreview(it, it.name, null) }, ruleError)
         }
 
-        val raw = inputs.mapIndexed { i, input ->
-            val ctx = RenameContext(i, input)
+        var order = 0
+        val raw = inputs.map { input ->
+            if (included != null && input.path !in included) {
+                return@map RenamePreview(input, input.name, null, excluded = true)
+            }
+            val ctx = RenameContext(order++, input)
             try {
-                RenamePreview(input, compute(input, active, includeExtension, ctx), null)
+                RenamePreview(input, compute(input, active, includeExtension, ctx, post), null)
             } catch (e: Exception) {
                 // 잘못된 그룹 참조($3 등) 같은 치환 오류
                 ruleError = "규칙 오류: ${e.message}"
@@ -237,6 +295,7 @@ object BatchRenamer {
         val originalKeys = inputs.map { it.parent to TextNorm.key(it.name) }.toSet()
 
         val previews = raw.map { p ->
+            if (p.excluded) return@map p
             val invalid = NameUtil.invalidReason(p.newName)
             val error = when {
                 invalid != null -> invalid
@@ -251,13 +310,26 @@ object BatchRenamer {
         return RenamePlan(previews, null)
     }
 
-    private fun compute(input: RenameInput, rules: List<RenameRule>, includeExt: Boolean, ctx: RenameContext): String {
+    private fun compute(
+        input: RenameInput,
+        rules: List<RenameRule>,
+        includeExt: Boolean,
+        ctx: RenameContext,
+        post: RenamePostOptions,
+    ): String {
         val split = !includeExt && !input.isDirectory
         var (base, ext) = if (split) NameUtil.splitExt(input.name) else input.name to ""
         for (r in rules) {
             base = r.applyName(base, ctx)
             if (split) ext = r.applyExt(ext, ctx)
         }
+        if (post.fixJamo) {
+            base = NameFixer.fixJamo(base)
+            ext = NameFixer.fixJamo(ext)
+        }
+        if (post.underscoreToSpace) base = NameFixer.underscoresToSpaces(base)
+        if (post.unifyEpisode) base = NameFixer.unifyEpisode(base)
+        if (post.cleanup) base = NameFixer.cleanup(base).ifEmpty { base }
         return NameUtil.join(base, ext)
     }
 

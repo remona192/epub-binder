@@ -171,6 +171,31 @@ fun GlobalDialogs(vm: AppViewModel) {
     }
 
     vm.chooser?.let { c -> AppChooserDialog(vm, c) }
+
+    vm.archiveTarget?.let { item ->
+        AlertDialog(
+            onDismissRequest = { vm.archiveTarget = null },
+            title = { Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "압축 파일 '${File(item.archivePath!!).name}' 안에 있는 파일입니다" +
+                            if (item.size > 0) " (${formatSize(item.size)})" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(onClick = { vm.openArchiveItem(item) }, modifier = Modifier.fillMaxWidth()) { Text("꺼내서 열기") }
+                    OutlinedButton(onClick = { vm.extractArchiveItemBeside(item) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("압축 파일 옆에 꺼내기")
+                    }
+                    OutlinedButton(onClick = { vm.showArchiveLocation(item) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("압축 파일 위치 열기")
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { vm.archiveTarget = null }) { Text("닫기") } },
+        )
+    }
 }
 
 @Composable

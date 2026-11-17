@@ -65,6 +65,7 @@ import com.simplefiles.core.CaseMode
 import com.simplefiles.core.NaturalOrder
 import com.simplefiles.core.RenameInput
 import com.simplefiles.core.RenamePlan
+import com.simplefiles.core.RenamePostOptions
 import com.simplefiles.core.RenameRule
 import com.simplefiles.core.TextPosition
 import kotlinx.coroutines.Dispatchers
@@ -78,6 +79,8 @@ private enum class OrderBy(val label: String) { NAME("이름순"), DATE("날짜�
 
 private val ruleFactories: List<Pair<String, () -> RenameRule>> = listOf(
     "찾아 바꾸기 (정규식)" to { RenameRule.Replace() },
+    "덮어쓰기 (새 이름)" to { RenameRule.Overwrite() },
+    "뒤에 화수 붙이기" to { RenameRule.EpisodeSuffix() },
     "글자 넣기" to { RenameRule.Insert() },
     "글자 지우기" to { RenameRule.Remove() },
     "번호 붙이기" to { RenameRule.Numbering() },
@@ -94,6 +97,10 @@ fun BatchRenameScreen(vm: AppViewModel, paths: List<String>) {
     var includeExt by remember { mutableStateOf(false) }
     var order by remember { mutableStateOf(OrderBy.NAME) }
     var addMenu by remember { mutableStateOf(false) }
+    // EPUB 바인더 일괄 변경의 후처리 옵션 (기본: 이름 정리 + 화수 보정 + 자소 분리 교정)
+    var post by remember { mutableStateOf(RenamePostOptions.RECOMMENDED) }
+    // 적용 범위: 체크 해제한 항목은 그대로 둔다
+    val excluded = remember { mutableStateListOf<String>() }
 
     val baseInputs by produceState(emptyList<RenameInput>(), paths) {
         value = withContext(Dispatchers.IO) {
@@ -108,9 +115,13 @@ fun BatchRenameScreen(vm: AppViewModel, paths: List<String>) {
         }
     }
     val rules = slots.map { it.rule }
-    val plan by produceState<RenamePlan?>(null, inputs, rules, includeExt) {
+    val excludedSet = excluded.toSet()
+    val plan by produceState<RenamePlan?>(null, inputs, rules, includeExt, post, excludedSet) {
         delay(120)
-        value = withContext(Dispatchers.IO) { BatchRenamer.plan(inputs, rules, includeExt) }
+        val included = if (excludedSet.isEmpty()) null else inputs.map { it.path }.filter { it !in excludedSet }.toSet()
+        value = withContext(Dispatchers.IO) {
+            BatchRenamer.plan(inputs, rules, includeExt, post = post, included = included)
+        }
     }
 
     fun update(i: Int, r: RenameRule) {
@@ -172,6 +183,23 @@ fun BatchRenameScreen(vm: AppViewModel, paths: List<String>) {
                     }
                 }
             }
+            item {
+                SectionTitle("적용 옵션 (규칙 적용 뒤 자동 처리)")
+                SectionCard {
+                    PostSwitch("이름 정리", "빈 괄호 · 겹친 공백 · 중복 구분자(-- __) 정리", post.cleanup) {
+                        post = post.copy(cleanup = it)
+                    }
+                    PostSwitch("화수 표기 보정", "12회차 · 12회 · #12 → 12화, 1~216화 → 1-216화, 03권 → 3권", post.unifyEpisode) {
+                        post = post.copy(unifyEpisode = it)
+                    }
+                    PostSwitch("자소 분리 교정", "풀어진 한글(ㄴㅐㄱㅏ)을 완성형으로", post.fixJamo) {
+                        post = post.copy(fixJamo = it)
+                    }
+                    PostSwitch("언더바를 공백으로", "텔레그램에서 받은 '제목_1권' → '제목 1권'", post.underscoreToSpace) {
+                        post = post.copy(underscoreToSpace = it)
+                    }
+                }
+            }
             item { SectionTitle("규칙 (위에서부터 차례로 적용)") }
             itemsIndexed(slots, key = { _, s -> s.id }) { i, slot ->
                 RuleCard(
@@ -202,10 +230,34 @@ fun BatchRenameScreen(vm: AppViewModel, paths: List<String>) {
                     }
                 }
             }
-            item { SectionTitle("미리보기") }
+            item {
+                val total = inputs.size
+                val on = total - excludedSet.count { ex -> inputs.any { it.path == ex } }
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 28.dp, end = 12.dp, top = 16.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("미리보기 · 적용 범위", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${on}/${total}개에 적용 (체크를 끄면 그 파일은 그대로)", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    androidx.compose.material3.TextButton(onClick = {
+                        if (excluded.isEmpty()) excluded.addAll(inputs.map { it.path }) else excluded.clear()
+                    }) { Text(if (excluded.isEmpty()) "모두 해제" else "전체 선택") }
+                }
+            }
             val previews = plan?.previews.orEmpty()
             itemsIndexed(previews, key = { _, p -> p.input.path }) { i, p ->
-                Column(Modifier.cardItem(i, previews.size).padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Row(
+                    Modifier.cardItem(i, previews.size).padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                Checkbox(
+                    checked = !p.excluded,
+                    onCheckedChange = { on -> if (on) excluded.remove(p.input.path) else excluded.add(p.input.path) },
+                )
+                Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
                     Text(
                         p.input.name,
                         style = MaterialTheme.typography.bodySmall,
@@ -223,6 +275,7 @@ fun BatchRenameScreen(vm: AppViewModel, paths: List<String>) {
                         fontWeight = if (p.changed) FontWeight.Medium else FontWeight.Normal,
                     )
                     p.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                }
                 }
                 if (i != previews.lastIndex) {
                     HorizontalDivider(Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -300,6 +353,22 @@ private fun RuleCard(
                         }
                     }
                 }
+                is RenameRule.Overwrite -> {
+                    Field("새 이름 (확장자 제외)", rule.newName) { onChange(rule.copy(newName = it)) }
+                    Hint("여러 파일에 같은 이름을 쓰면 겹치므로 '뒤에 화수 붙이기'나 '번호 붙이기'와 함께 쓰세요")
+                }
+                is RenameRule.EpisodeSuffix -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        NumberField("시작 번호", rule.start, Modifier.weight(1f)) { onChange(rule.copy(start = it)) }
+                        NumberField("증가", rule.step, Modifier.weight(1f)) { onChange(rule.copy(step = it)) }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("화", "권").forEach { u ->
+                            key(u) { FilterChip(selected = rule.unit == u, onClick = { onChange(rule.copy(unit = u)) }, label = { Text(u) }) }
+                        }
+                    }
+                    Hint("이름 끝에 있던 'N화/N권'은 지우고 새 번호를 붙입니다 (적용 범위에 든 파일만 차례로)")
+                }
                 is RenameRule.Extension -> {
                     Field("새 확장자 (예: txt, 비우면 제거)", rule.newExt) { onChange(rule.copy(newExt = it)) }
                     Hint("'확장자까지 포함' 옵션이 꺼져 있을 때만 적용됩니다")
@@ -359,4 +428,18 @@ private fun PositionChips(current: TextPosition, allowIndex: Boolean, onChange: 
 @Composable
 private fun Hint(text: String) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun PostSwitch(title: String, desc: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title)
+            Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
 }

@@ -15,6 +15,9 @@ kotlin {
 
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    // zip / 7z 내부 목록 읽기
+    api("org.apache.commons:commons-compress:1.27.1")
+    implementation("org.tukaani:xz:1.10")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <external-path name="external" path="." />
+    <!-- 압축 파일에서 꺼내 연 파일 -->
+    <cache-path name="cache" path="." />
     <!-- SD 카드 등 다른 저장소 -->
     <root-path name="root" path="." />
 </paths>

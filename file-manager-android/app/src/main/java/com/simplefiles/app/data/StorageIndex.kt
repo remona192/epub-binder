@@ -1,5 +1,6 @@
 package com.simplefiles.app.data
 
+import com.simplefiles.core.ArchiveReader
 import com.simplefiles.core.TextNorm
 import com.simplefiles.core.TrashStore
 import kotlinx.coroutines.CoroutineScope
@@ -37,7 +38,24 @@ class StorageIndex(private val scope: CoroutineScope) {
     private var job: Job? = null
     @Volatile private var generation = 0
 
-    fun rebuild(roots: List<File>, showHidden: Boolean) {
+    private data class ArchiveKey(val path: String, val size: Long, val modified: Long)
+
+    /** 압축 파일 목록 캐시 (다시 색인할 때 바뀌지 않은 압축 파일은 다시 열지 않음) */
+    private val archiveCache = java.util.concurrent.ConcurrentHashMap<ArchiveKey, List<IndexEntry>>()
+
+    private val _archiveScanning = MutableStateFlow(false)
+    val archiveScanning: StateFlow<Boolean> = _archiveScanning.asStateFlow()
+
+    /**
+     * @param includeArchives zip/7z 안의 파일도 색인 (파일 색인을 먼저 끝낸 뒤 이어서)
+     * @param onFilesScanned 일반 파일 색인이 끝났을 때 (IO 스레드)
+     */
+    fun rebuild(
+        roots: List<File>,
+        showHidden: Boolean,
+        includeArchives: Boolean = true,
+        onFilesScanned: (List<IndexEntry>) -> Unit = {},
+    ) {
         job?.cancel()
         val gen = ++generation
         job = scope.launch(Dispatchers.IO) {
@@ -90,13 +108,52 @@ class StorageIndex(private val scope: CoroutineScope) {
                         }
                     }
                 }
-                _entries.value = list
+                _entries.value = ArrayList(list)
                 _ready.value = true
+                runCatching { onFilesScanned(list) }
+
+                if (includeArchives) {
+                    _archiveScanning.value = true
+                    val archives = list.filter { !it.item.isDir && ArchiveReader.isSupported(it.item.name) }
+                    val alive = HashSet<ArchiveKey>()
+                    var lastArchivePublish = System.currentTimeMillis()
+                    for (a in archives) {
+                        ensureActive()
+                        val key = ArchiveKey(a.item.path, a.item.size, a.item.lastModified)
+                        alive += key
+                        val inner = archiveCache.getOrPut(key) { readArchive(a.item) }
+                        list.addAll(inner)
+                        val now = System.currentTimeMillis()
+                        if (now - lastArchivePublish > 1500) {
+                            _entries.value = ArrayList(list)
+                            lastArchivePublish = now
+                        }
+                    }
+                    archiveCache.keys.retainAll(alive)
+                    _entries.value = list
+                }
             } finally {
-                if (gen == generation) _scanning.value = false
+                if (gen == generation) {
+                    _scanning.value = false
+                    _archiveScanning.value = false
+                }
             }
         }
     }
+
+    private fun readArchive(archive: FileItem): List<IndexEntry> =
+        ArchiveReader.list(File(archive.path)).map { e ->
+            val item = FileItem(
+                path = archive.path + "!/" + e.path,
+                name = e.name,
+                isDir = e.isDirectory,
+                size = e.size,
+                lastModified = e.lastModified,
+                archivePath = archive.path,
+                entryPath = e.path,
+            )
+            IndexEntry(item, TextNorm.key(e.name))
+        }
 
     private fun isSkipped(dir: Path): Boolean {
         val s = dir.toString()
