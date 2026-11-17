@@ -1,0 +1,48 @@
+name: File Manager APK
+
+on:
+  push:
+    paths:
+      - "file-manager-android/**"
+      - ".github/workflows/file-manager-apk.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: file-manager-android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests (core logic)
+        run: ./gradlew :core:test --stacktrace
+
+      - name: Build APKs
+        run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
+
+      - name: Collect APKs
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk out/FileManager-release.apk
+          cp app/build/outputs/apk/debug/app-debug.apk out/FileManager-debug.apk
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FileManager-apk
+          path: file-manager-android/out/*.apk
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-reports
+          path: file-manager-android/core/build/reports/tests/

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-path name="external" path="." />
+    <!-- SD 카드 등 다른 저장소 -->
+    <root-path name="root" path="." />
+</paths>
